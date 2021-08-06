@@ -1,0 +1,63 @@
+#ifndef UPF_GENL_H__
+#define UPF_GENL_H__
+
+#include <net/genetlink.h>
+
+enum {
+	UPF_CMD_UNSPEC,
+	UPF_CMD_ADD_PDR,
+	UPF_CMD_ADD_FAR,
+	UPF_CMD_ADD_QER,
+	UPF_CMD_DEL_PDR,
+	UPF_CMD_DEL_FAR,
+	UPF_CMD_DEL_QER,
+	UPF_CMD_GET_PDR,
+	UPF_CMD_GET_FAR,
+	UPF_CMD_GET_QER,
+	UPF_CMD_IND_DL_DATA,
+};
+
+enum {
+	UPF_MCGRP_DATA,
+};
+
+enum {
+	UPF_ATTR_UNSPEC,
+	/* device attributes */
+	UPF_ATTR_LINK,
+	UPF_ATTR_NET_NS_FD,
+	/* PDR attributes */
+	UPF_ATTR_PDR_ID,
+	UPF_ATTR_PDR_PRECEDENCE,
+	UPF_ATTR_PDR_PDI,
+	UPF_ATTR_OUTER_HEADER_REMOVAL,
+	UPF_ATTR_PDR_FAR_ID,
+	__UPF_ATTR_PDR_ROLE_ADDR_IPV4, /* deprecated */
+	__UPF_ATTR_PDR_UNIX_SOCKET_PATH, /* deprecated */
+	UPF_ATTR_PDR_QER_ID,
+};
+
+#define UPF_ATTR_MAX 0x10
+
+enum {
+	UPF_PDI_ATTR_UNSPEC,
+	UPF_PDI_ATTR_UE_ADDR_IPV4,
+	UPF_PDI_ATTR_F_TEID,
+	UPF_PDI_ATTR_SDF_FILTER,
+	__UPF_PDI_ATTR_MAX,
+};
+#define UPF_PDI_ATTR_MAX (__UPF_PDI_ATTR_MAX - 1)
+
+enum {
+	UPF_F_TEID_ATTR_UNSPEC,
+	UPF_F_TEID_ATTR_I_TEID,
+	UPF_F_TEID_ATTR_GTPU_ADDR_IPV4,
+	__UPF_F_TEID_ATTR_MAX,
+};
+#define UPF_F_TEID_ATTR_MAX (__UPF_F_TEID_ATTR_MAX - 1)
+
+extern struct genl_family upf_genl_family;
+
+extern void notify(int);
+
+#endif
