@@ -1,7 +1,14 @@
 #include <linux/netdevice.h>
+#include <linux/udp.h>
+#include <linux/net.h>
+#include <linux/socket.h>
 
 #include "dev.h"
 #include "genl.h"
+#include "encap.h"
+#include "pdr.h"
+#include "far.h"
+#include "qer.h"
 
 
 struct upf_dev *upf_find_dev(struct net *src_net, int ifindex, int netnsfd)
@@ -29,10 +36,97 @@ struct upf_dev *upf_find_dev(struct net *src_net, int ifindex, int netnsfd)
 	return upf;
 }
 
+int upf_dev_hashtable_new(struct upf_dev *upf, int hsize)
+{
+	int i;
+
+	upf->addr_hash = kmalloc_array(hsize, sizeof(struct hlist_head),
+			GFP_KERNEL);
+	if (!upf->addr_hash)
+		goto err;
+
+	upf->i_teid_hash = kmalloc_array(hsize, sizeof(struct hlist_head),
+			GFP_KERNEL);
+	if (!upf->i_teid_hash)
+		goto err;
+
+	upf->pdr_id_hash = kmalloc_array(hsize, sizeof(struct hlist_head),
+			GFP_KERNEL);
+	if (!upf->pdr_id_hash)
+		goto err;
+
+	upf->far_id_hash = kmalloc_array(hsize, sizeof(struct hlist_head),
+			GFP_KERNEL);
+	if (!upf->far_id_hash)
+		goto err;
+
+	upf->qer_id_hash = kmalloc_array(hsize, sizeof(struct hlist_head),
+			GFP_KERNEL);
+	if (!upf->qer_id_hash)
+		goto err;
+
+	upf->related_far_hash = kmalloc_array(hsize, sizeof(struct hlist_head),
+			GFP_KERNEL);
+	if (!upf->related_far_hash)
+		goto err;
+
+	upf->related_qer_hash = kmalloc_array(hsize, sizeof(struct hlist_head),
+			GFP_KERNEL);
+	if (!upf->related_qer_hash)
+		goto err;
+
+	upf->hash_size = hsize;
+
+	for (i = 0; i < hsize; i++) {
+		INIT_HLIST_HEAD(&upf->addr_hash[i]);
+		INIT_HLIST_HEAD(&upf->i_teid_hash[i]);
+		INIT_HLIST_HEAD(&upf->pdr_id_hash[i]);
+		INIT_HLIST_HEAD(&upf->far_id_hash[i]);
+		INIT_HLIST_HEAD(&upf->qer_id_hash[i]);
+		INIT_HLIST_HEAD(&upf->related_far_hash[i]);
+		INIT_HLIST_HEAD(&upf->related_qer_hash[i]);
+	}
+
+	return 0;
+err:
+	upf_dev_hashtable_free(upf);
+	return -ENOMEM;
+}
+
+void upf_dev_hashtable_free(struct upf_dev *upf)
+{
+	struct pdr *pdr;
+	struct far *far;
+	struct qer *qer;
+	int i;
+
+	for (i = 0; i < upf->hash_size; i++) {
+		hlist_for_each_entry_rcu(qer, &upf->qer_id_hash[i], hlist_id)
+			qer_context_delete(qer);
+		hlist_for_each_entry_rcu(far, &upf->far_id_hash[i], hlist_id)
+			far_context_delete(far);
+		hlist_for_each_entry_rcu(pdr, &upf->pdr_id_hash[i], hlist_id)
+			pdr_context_delete(pdr);
+	}
+
+	synchronize_rcu();
+
+	kfree(upf->addr_hash);
+	kfree(upf->i_teid_hash);
+	kfree(upf->pdr_id_hash);
+	kfree(upf->far_id_hash);
+	kfree(upf->qer_id_hash);
+	kfree(upf->related_far_hash);
+	kfree(upf->related_qer_hash);
+}
 
 static int upf_dev_init(struct net_device *dev)
 {
+	struct upf_dev *upf = netdev_priv(dev);
+
 	printk("<%s: %d> start\n", __func__, __LINE__);
+
+	upf->dev = dev;
 
 	dev->tstats = netdev_alloc_pcpu_stats(struct pcpu_sw_netstats);
 	if (!dev->tstats)
@@ -43,8 +137,11 @@ static int upf_dev_init(struct net_device *dev)
 
 static void upf_dev_uninit(struct net_device *dev)
 {
+	struct upf_dev *upf = netdev_priv(dev);
+
 	printk("<%s: %d> start\n", __func__, __LINE__);
 
+	upf_encap_disable(upf->sk1u);
 	free_percpu(dev->tstats);
 }
 

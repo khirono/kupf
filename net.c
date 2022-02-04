@@ -5,10 +5,7 @@
 
 #include "dev.h"
 #include "net.h"
-
-struct upf_net {
-	struct list_head upf_dev_list;
-};
+#include "link.h"
 
 
 static unsigned int upf_net_id __read_mostly;
@@ -28,18 +25,11 @@ static int __net_init upf_net_init(struct net *net)
 
 static void __net_exit upf_net_exit(struct net *net)
 {
-	printk("<%s: %d> start\n", __func__, __LINE__);
-#if 0
 	struct upf_net *n = net_generic(net, upf_net_id);
-	struct upf_dev *upf;
-	LIST_HEAD(list);
-	rtnl_lock();
-	list_for_each_entry(upf, &n->upf_dev_list, list)
-		upf_dellink(upf->dev, &list);
 
-	unregister_netdevice_many(&list);
-	rtnl_unlock();
-#endif
+	printk("<%s: %d> start\n", __func__, __LINE__);
+
+	upf_link_all_del(&n->upf_dev_list);
 }
 
 struct pernet_operations upf_net_ops = {
