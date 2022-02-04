@@ -109,11 +109,17 @@ static int upf_newlink(struct net *net, struct net_device *dev,
 		hashsize = nla_get_u32(data[IFLA_UPF_PDR_HASHSIZE]);
 	}
 
-	// upf_hashtable_new(upf, hashsize)
+	err = upf_dev_hashtable_new(upf, hashsize);
+	if (err) {
+		upf_encap_disable(upf->sk1u);
+		return err;
+	}
 
 	err = register_netdevice(dev);
 	if (err < 0) {
 		netdev_dbg(dev, "failed to register new netdev %d\n", err);
+		upf_dev_hashtable_free(upf);
+		upf_encap_disable(upf->sk1u);
 		return err;
 	}
 
