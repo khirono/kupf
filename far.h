@@ -37,5 +37,6 @@ struct far {
 };
 
 extern void far_context_delete(struct far *);
+extern struct far *find_far_by_id(struct upf_dev *, u64, u32);
 
 #endif

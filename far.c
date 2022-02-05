@@ -54,3 +54,19 @@ void far_context_delete(struct far *far)
 
 	call_rcu(&far->rcu_head, far_context_free);
 }
+
+struct far *find_far_by_id(struct upf_dev *upf, u64 seid, u32 far_id)
+{
+	struct hlist_head *head;
+	struct far *far;
+	char *seid_far_id_hexstr;
+
+	seid_far_id_hexstr = seid_far_id_to_hex_str(seid, far_id);
+	head = &upf->far_id_hash[str_hashfn(seid_far_id_hexstr) % upf->hash_size];
+	hlist_for_each_entry_rcu(far, head, hlist_id) {
+		if (far->seid == seid && far->id == far_id)
+			return far;
+	}
+
+	return NULL;
+}

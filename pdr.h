@@ -80,5 +80,6 @@ struct pdr {
 
 extern void pdr_context_delete(struct pdr *);
 extern void unix_sock_client_delete(struct pdr *);
+extern struct pdr *find_pdr_by_id(struct upf_dev *, u64, u16);
 
 #endif

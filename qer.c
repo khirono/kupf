@@ -43,3 +43,19 @@ void qer_context_delete(struct qer *qer)
 
 	call_rcu(&qer->rcu_head, qer_context_free);
 }
+
+struct qer *find_qer_by_id(struct upf_dev *upf, u64 seid, u32 qer_id)
+{
+	struct hlist_head *head;
+	struct qer *qer;
+	char *seid_qer_id_hexstr;
+
+	seid_qer_id_hexstr = seid_qer_id_to_hex_str(seid, qer_id);
+	head = &upf->qer_id_hash[str_hashfn(seid_qer_id_hexstr) % upf->hash_size];
+	hlist_for_each_entry_rcu(qer, head, hlist_id) {
+		if (qer->seid == seid && qer->id == qer_id)
+			return qer;
+	}
+
+	return NULL;
+}

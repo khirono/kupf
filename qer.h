@@ -32,5 +32,6 @@ struct qer {
 };
 
 extern void qer_context_delete(struct qer *);
+extern struct qer *find_qer_by_id(struct upf_dev *, u64, u32);
 
 #endif

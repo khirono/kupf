@@ -1,4 +1,12 @@
+#include "dev.h"
 #include "pdr.h"
+#include "seid.h"
+#include "hash.h"
+
+static char *seid_pdr_id_to_hex_str(u64 seid_int, u16 pdr_id)
+{
+	return seid_and_u32id_to_hex_str(seid_int, (u32)pdr_id);
+}
 
 static void pdr_context_free(struct rcu_head *head)
 {
@@ -82,4 +90,20 @@ void unix_sock_client_delete(struct pdr *pdr)
 		sock_release(pdr->sock_for_buf);
 
 	pdr->sock_for_buf = NULL;
+}
+
+struct pdr *find_pdr_by_id(struct upf_dev *upf, u64 seid, u16 pdr_id)
+{
+	struct hlist_head *head;
+	struct pdr *pdr;
+	char *seid_pdr_id;
+
+	seid_pdr_id = seid_pdr_id_to_hex_str(seid, pdr_id);
+	head = &upf->pdr_id_hash[str_hashfn(seid_pdr_id) % upf->hash_size];
+	hlist_for_each_entry_rcu(pdr, head, hlist_id) {
+		if (pdr->seid == seid && pdr->id == pdr_id)
+			return pdr;
+	}
+
+	return NULL;
 }

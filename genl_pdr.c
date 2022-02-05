@@ -6,10 +6,10 @@
 #include <net/genetlink.h>
 #include <net/rtnetlink.h>
 
-
 #include "dev.h"
 #include "genl.h"
 #include "genl_pdr.h"
+#include "pdr.h"
 
 
 static int parse_pdi(struct nlattr *);
@@ -22,7 +22,8 @@ int upf_genl_add_pdr(struct sk_buff *skb, struct genl_info *info)
 	struct upf_dev *upf;
 	int ifindex;
 	int netnsfd;
-	u32 pdr_id;
+	u64 seid;
+	u16 pdr_id;
 	u32 precedence;
 	u8 removal;
 	u32 far_id;
@@ -59,8 +60,15 @@ int upf_genl_add_pdr(struct sk_buff *skb, struct genl_info *info)
 		return -ENODEV;
 	}
 
+	if (info->attrs[UPF_ATTR_PDR_SEID]) {
+		seid = nla_get_u32(info->attrs[UPF_ATTR_PDR_SEID]);
+		printk("SEID: %llu\n", seid);
+	} else {
+		seid = 0;
+	}
+
 	if (info->attrs[UPF_ATTR_PDR_ID]) {
-		pdr_id = nla_get_u32(info->attrs[UPF_ATTR_PDR_ID]);
+		pdr_id = nla_get_u16(info->attrs[UPF_ATTR_PDR_ID]);
 		printk("PDR ID: %u\n", pdr_id);
 	} else {
 		rcu_read_unlock();
@@ -102,7 +110,59 @@ int upf_genl_add_pdr(struct sk_buff *skb, struct genl_info *info)
 
 int upf_genl_del_pdr(struct sk_buff *skb, struct genl_info *info)
 {
+	struct upf_dev *upf;
+	struct pdr *pdr;
+	int ifindex;
+	int netnsfd;
+	u64 seid;
+	u16 pdr_id;
+
 	printk("<%s:%d> start\n", __func__, __LINE__);
+
+	if (!info->attrs[UPF_ATTR_LINK]) {
+		return -EINVAL;
+	}
+	ifindex = nla_get_u32(info->attrs[UPF_ATTR_LINK]);
+	printk("ifindex: %d\n", ifindex);
+
+	if (info->attrs[UPF_ATTR_NET_NS_FD]) {
+		netnsfd = nla_get_u32(info->attrs[UPF_ATTR_NET_NS_FD]);
+	} else {
+		netnsfd = -1;
+	}
+	printk("netnsfd: %d\n", netnsfd);
+
+	rcu_read_lock();
+
+	upf = upf_find_dev(sock_net(skb->sk), ifindex, netnsfd);
+	if (!upf) {
+		rcu_read_unlock();
+		return -ENODEV;
+	}
+
+	if (info->attrs[UPF_ATTR_PDR_SEID]) {
+		seid = nla_get_u64(info->attrs[UPF_ATTR_PDR_SEID]);
+		printk("SEID: %llu\n", seid);
+	} else {
+		seid = 0;
+	}
+
+	if (info->attrs[UPF_ATTR_PDR_ID]) {
+		pdr_id = nla_get_u16(info->attrs[UPF_ATTR_PDR_ID]);
+		printk("FAR ID: %u\n", pdr_id);
+	} else {
+		rcu_read_unlock();
+		return -ENODEV;
+	}
+
+	pdr = find_pdr_by_id(upf, seid, pdr_id);
+	if (!pdr) {
+		rcu_read_unlock();
+		return -ENOENT;
+	}
+
+	pdr_context_delete(pdr);
+	rcu_read_unlock();
 
 	return 0;
 }
