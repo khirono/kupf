@@ -38,7 +38,7 @@ int upf_genl_del_qer(struct sk_buff *skb, struct genl_info *info)
 
 	rcu_read_lock();
 
-	upf = upf_find_dev(sock_net(skb->sk), ifindex, netnsfd);
+	upf = find_upf_dev(sock_net(skb->sk), ifindex, netnsfd);
 	if (!upf) {
 		rcu_read_unlock();
 		return -ENODEV;

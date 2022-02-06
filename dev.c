@@ -11,7 +11,7 @@
 #include "qer.h"
 
 
-struct upf_dev *upf_find_dev(struct net *src_net, int ifindex, int netnsfd)
+struct upf_dev *find_upf_dev(struct net *src_net, int ifindex, int netnsfd)
 {
 	struct upf_dev *upf;
 	struct net_device *dev;

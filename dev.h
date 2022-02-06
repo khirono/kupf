@@ -22,7 +22,7 @@ struct upf_dev {
 
 extern const struct net_device_ops upf_netdev_ops;
 
-extern struct upf_dev *upf_find_dev(struct net *, int, int);
+extern struct upf_dev *find_upf_dev(struct net *, int, int);
 
 extern int upf_dev_hashtable_new(struct upf_dev *, int);
 extern void upf_dev_hashtable_free(struct upf_dev *);
