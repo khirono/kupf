@@ -1,3 +1,5 @@
+#include <linux/rculist.h>
+
 #include "dev.h"
 #include "qer.h"
 #include "pdr.h"

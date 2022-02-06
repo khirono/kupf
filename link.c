@@ -7,14 +7,7 @@
 #include "net.h"
 #include "link.h"
 #include "encap.h"
-
-struct gtp1_header {
-	__u8 flags;
-	__u8 type;
-	__be16 length;
-	__be32 tid;
-} __attribute__((packed));
-
+#include "gtp.h"
 
 static void upf_link_setup(struct net_device *dev)
 {
@@ -28,7 +21,7 @@ static void upf_link_setup(struct net_device *dev)
 	dev->mtu = ETH_DATA_LEN -
 		(sizeof(struct iphdr) +
 		 sizeof(struct udphdr) +
-		 sizeof(struct gtp1_header));
+		 sizeof(struct gtpv1_hdr));
 
 	/* Zero header length. */
 	dev->type = ARPHRD_NONE;
@@ -42,7 +35,7 @@ static void upf_link_setup(struct net_device *dev)
 	dev->needed_headroom = LL_MAX_HEADER +
 		sizeof(struct iphdr) +
 		sizeof(struct udphdr) +
-		sizeof(struct gtp1_header);
+		sizeof(struct gtpv1_hdr);
 }
 
 static int upf_validate(struct nlattr *tb[], struct nlattr *data[],

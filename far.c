@@ -70,3 +70,34 @@ struct far *find_far_by_id(struct upf_dev *upf, u64 seid, u32 far_id)
 
 	return NULL;
 }
+
+void far_update(struct far *far, struct upf_dev *upf, u8 *flag,
+		struct upf_emark_pktinfo *epkt_info)
+{
+	struct pdr *pdr;
+	struct hlist_head *head;
+	char *seid_far_id_hexstr;
+
+	seid_far_id_hexstr = seid_far_id_to_hex_str(far->seid, far->id);
+	head = &upf->related_far_hash[str_hashfn(seid_far_id_hexstr) % upf->hash_size];
+	hlist_for_each_entry_rcu(pdr, head, hlist_related_far) {
+		if (pdr->seid == far->seid && *pdr->far_id == far->id) {
+			if (flag != NULL && *flag == 1) {
+				epkt_info->role_addr = pdr->role_addr_ipv4.s_addr;
+				epkt_info->sk = pdr->sk;
+			}
+			pdr->far = far;
+			unix_sock_client_update(pdr);
+		}
+	}
+}
+
+void far_append(u64 seid, u32 far_id, struct far *far, struct upf_dev *upf)
+{
+	char *seid_far_id_hexstr;
+	u32 i;
+
+	seid_far_id_hexstr = seid_far_id_to_hex_str(seid, far_id);
+	i = str_hashfn(seid_far_id_hexstr) % upf->hash_size;
+	hlist_add_head_rcu(&far->hlist_id, &upf->far_id_hash[i]);
+}
