@@ -101,3 +101,22 @@ void far_append(u64 seid, u32 far_id, struct far *far, struct upf_dev *upf)
 	i = str_hashfn(seid_far_id_hexstr) % upf->hash_size;
 	hlist_add_head_rcu(&far->hlist_id, &upf->far_id_hash[i]);
 }
+
+int far_get_pdr_ids(u16 *ids, int n, struct far *far, struct upf_dev *upf)
+{
+	struct hlist_head *head;
+	struct pdr *pdr;
+	char *seid_far_id_hexstr;
+	int i;
+
+	seid_far_id_hexstr = seid_far_id_to_hex_str(far->seid, far->id);
+	head = &upf->related_far_hash[str_hashfn(seid_far_id_hexstr) % upf->hash_size];
+	i = 0;
+	hlist_for_each_entry_rcu(pdr, head, hlist_related_far) {
+		if (i >= n)
+			break;
+		if (pdr->seid == far->seid && *pdr->far_id == far->id)
+			ids[i++] = pdr->id;
+	}
+	return i;
+}

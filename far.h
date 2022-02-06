@@ -43,5 +43,6 @@ extern struct far *find_far_by_id(struct upf_dev *, u64, u32);
 extern void far_update(struct far *, struct upf_dev *, u8 *,
 		struct upf_emark_pktinfo *);
 extern void far_append(u64, u32, struct far *, struct upf_dev *);
+extern int far_get_pdr_ids(u16 *, int, struct far *, struct upf_dev *);
 
 #endif

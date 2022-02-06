@@ -17,6 +17,8 @@ static int forwarding_parameter_fill(struct forwarding_parameter *,
 static int far_fill(struct far *, struct upf_dev *, struct genl_info *,
 		u8 *, struct upf_emark_pktinfo *);
 
+static int upf_genl_fill_far(struct sk_buff *, u32, u32, u32, struct far *);
+
 
 int upf_genl_add_far(struct sk_buff *skb, struct genl_info *info)
 {
@@ -212,16 +214,136 @@ int upf_genl_del_far(struct sk_buff *skb, struct genl_info *info)
 
 int upf_genl_get_far(struct sk_buff *skb, struct genl_info *info)
 {
+	struct upf_dev *upf;
+	struct far *far;
+	int ifindex;
+	int netnsfd;
+	u64 seid;
+	u32 far_id;
+	struct sk_buff *skb_ack;
+	int err;
+
 	printk("<%s:%d> start\n", __func__, __LINE__);
 
-	return 0;
+	if (!info->attrs[UPF_ATTR_LINK])
+		return -EINVAL;
+	ifindex = nla_get_u32(info->attrs[UPF_ATTR_LINK]);
+	printk("ifindex: %d\n", ifindex);
+
+	if (info->attrs[UPF_ATTR_NET_NS_FD])
+		netnsfd = nla_get_u32(info->attrs[UPF_ATTR_NET_NS_FD]);
+	else
+		netnsfd = -1;
+	printk("netnsfd: %d\n", netnsfd);
+
+	rcu_read_lock();
+
+	upf = find_upf_dev(sock_net(skb->sk), ifindex, netnsfd);
+	if (!upf) {
+		rcu_read_unlock();
+		return -ENODEV;
+	}
+
+	if (info->attrs[UPF_ATTR_FAR_SEID]) {
+		seid = nla_get_u64(info->attrs[UPF_ATTR_FAR_SEID]);
+		printk("SEID: %llu\n", seid);
+	} else {
+		seid = 0;
+	}
+
+	if (info->attrs[UPF_ATTR_FAR_ID]) {
+		far_id = nla_get_u32(info->attrs[UPF_ATTR_FAR_ID]);
+		printk("FAR ID: %u\n", far_id);
+	} else {
+		rcu_read_unlock();
+		return -ENODEV;
+	}
+
+	far = find_far_by_id(upf, seid, far_id);
+	if (!far) {
+		rcu_read_unlock();
+		return -ENOENT;
+	}
+
+	skb_ack = genlmsg_new(NLMSG_GOODSIZE, GFP_ATOMIC);
+	if (!skb_ack) {
+		rcu_read_unlock();
+		return -ENOMEM;
+	}
+
+	err = upf_genl_fill_far(skb_ack,
+			NETLINK_CB(skb).portid,
+			info->snd_seq,
+			info->nlhdr->nlmsg_type,
+			far);
+	if (err) {
+		kfree_skb(skb_ack);
+		rcu_read_unlock();
+		return err;
+	}
+
+	rcu_read_unlock();
+
+	return genlmsg_unicast(genl_info_net(info), skb_ack, info->snd_portid);
 }
+
+#include <linux/rculist.h>
+#include <net/netns/generic.h>
+#include "net.h"
 
 int upf_genl_dump_far(struct sk_buff *skb, struct netlink_callback *cb)
 {
+	/* netlink_callback->args
+	 * args[0] : index of gtp5g dev id
+	 * args[1] : index of gtp5g hash entry id in dev
+	 * args[2] : index of gtp5g far id
+	 * args[5] : set non-zero means it is finished
+	 */
+	struct upf_dev *upf;
+	struct upf_dev *last_upf = (struct upf_dev *)cb->args[0];
+	struct net *net = sock_net(skb->sk);
+	struct upf_net *upf_net = net_generic(net, UPF_NET_ID());
+	int i;
+	int last_hash_entry_id = cb->args[1];
+	int ret;
+	u32 far_id = cb->args[2];
+	struct far *far;
+
 	printk("<%s:%d> start\n", __func__, __LINE__);
 
-	return 0;
+	if (cb->args[5])
+		return 0;
+
+	list_for_each_entry_rcu(upf, &upf_net->upf_dev_list, list) {
+		if (last_upf && last_upf != upf)
+			continue;
+		else
+			last_upf = NULL;
+
+		for (i = last_hash_entry_id; i < upf->hash_size; i++) {
+			hlist_for_each_entry_rcu(far, &upf->far_id_hash[i], hlist_id) {
+				if (far_id && far_id != far->id)
+					continue;
+				else
+					far_id = 0;
+
+				ret = upf_genl_fill_far(skb,
+						NETLINK_CB(cb->skb).portid,
+						cb->nlh->nlmsg_seq,
+						cb->nlh->nlmsg_type,
+						far);
+				if (ret) {
+					cb->args[0] = (unsigned long)upf;
+					cb->args[1] = i;
+					cb->args[2] = far->id;
+					goto out;
+				}
+			}
+		}
+	}
+	cb->args[5] = 1;
+out:
+	return skb->len;
 }
 
 static int header_creation_fill(struct forwarding_parameter *param,
@@ -382,4 +504,81 @@ static int far_fill(struct far *far, struct upf_dev *upf, struct genl_info *info
 	far_update(far, upf, flag, epkt_info);
 
 	return 0;
+}
+
+static int upf_genl_fill_far(struct sk_buff *skb, u32 snd_portid, u32 snd_seq,
+		u32 type, struct far *far)
+{
+	struct upf_dev *upf = netdev_priv(far->dev);
+	void *genlh;
+	struct nlattr *nest_fwd_param;
+	struct nlattr *nest_hdr_creation;
+	struct forwarding_parameter *fwd_param;
+	struct outer_header_creation *hdr_creation;
+	struct forwarding_policy *fwd_policy;
+	u16 *ids;
+	int n;
+
+	genlh = genlmsg_put(skb, snd_portid, snd_seq, &upf_genl_family, 0, type);
+	if (!genlh)
+		goto genlmsg_fail;
+
+	if (nla_put_u32(skb, UPF_ATTR_FAR_ID, far->id))
+		goto genlmsg_fail;
+	if (nla_put_u8(skb, UPF_ATTR_FAR_APPLY_ACTION, far->action))
+		goto genlmsg_fail;
+
+	if (far->seid) {
+		if (nla_put_u64_64bit(skb, UPF_ATTR_FAR_SEID, far->seid, 0))
+			goto genlmsg_fail;
+	}
+	if (far->fwd_param) {
+		nest_fwd_param = nla_nest_start(skb, UPF_ATTR_FAR_FORWARDING_PARAMETER);
+		if (!nest_fwd_param)
+			goto genlmsg_fail;
+
+		fwd_param = far->fwd_param;
+		if (fwd_param->hdr_creation) {
+			nest_hdr_creation = nla_nest_start(skb, UPF_ATTR_FORWARDING_PARAMETER_OUTER_HEADER_CREATION);
+			if (!nest_hdr_creation)
+				goto genlmsg_fail;
+
+			hdr_creation = fwd_param->hdr_creation;
+			if (nla_put_u16(skb, UPF_ATTR_OUTER_HEADER_CREATION_DESCRIPTION, hdr_creation->description))
+				goto genlmsg_fail;
+			if (nla_put_u32(skb, UPF_ATTR_OUTER_HEADER_CREATION_O_TEID, ntohl(hdr_creation->teid)))
+				goto genlmsg_fail;
+			if (nla_put_be32(skb, UPF_ATTR_OUTER_HEADER_CREATION_PEER_ADDR_IPV4, hdr_creation->peer_addr_ipv4.s_addr))
+				goto genlmsg_fail;
+			if (nla_put_u16(skb, UPF_ATTR_OUTER_HEADER_CREATION_PORT, ntohs(hdr_creation->port)))
+				goto genlmsg_fail;
+
+			nla_nest_end(skb, nest_hdr_creation);
+		}
+
+		if ((fwd_policy = fwd_param->fwd_policy))
+			if (nla_put(skb, UPF_ATTR_FORWARDING_PARAMETER_FORWARDING_POLICY, fwd_policy->len, fwd_policy->identifier))
+				goto genlmsg_fail;
+
+		nla_nest_end(skb, nest_fwd_param);
+	}
+
+	ids = kzalloc(0xff * sizeof(u16), GFP_KERNEL);
+	if (!ids)
+		goto genlmsg_fail;
+	n = far_get_pdr_ids(ids, 0xff, far, upf);
+	if (n) {
+		if (nla_put(skb, UPF_ATTR_FAR_RELATED_TO_PDR, n * sizeof(u16), ids)) {
+			kfree(ids);
+			genlmsg_cancel(skb, genlh);
+			return -EMSGSIZE;
+		}
+	}
+	kfree(ids);
+
+	genlmsg_end(skb, genlh);
+	return 0;
+genlmsg_fail:
+	genlmsg_cancel(skb, genlh);
+	return -EMSGSIZE;
 }
