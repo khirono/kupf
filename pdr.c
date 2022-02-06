@@ -1,5 +1,6 @@
 #include "dev.h"
 #include "pdr.h"
+#include "genl_far.h"
 #include "seid.h"
 #include "hash.h"
 
@@ -90,6 +91,43 @@ void unix_sock_client_delete(struct pdr *pdr)
 		sock_release(pdr->sock_for_buf);
 
 	pdr->sock_for_buf = NULL;
+}
+
+// Create a AF_UNIX client by specific name sent from user space
+int unix_sock_client_new(struct pdr *pdr)
+{
+	struct socket **psock = &pdr->sock_for_buf;
+	struct sockaddr_un *addr = &pdr->addr_unix;
+	int err;
+
+	if (strlen(addr->sun_path) == 0)
+		return -EINVAL;
+
+	err = sock_create(AF_UNIX, SOCK_DGRAM, 0, psock);
+	if (err)
+		return err;
+
+	err = (*psock)->ops->connect(*psock, (struct sockaddr *)addr,
+			sizeof(addr->sun_family) + strlen(addr->sun_path), 0);
+	if (err) {
+		unix_sock_client_delete(pdr);
+		return err;
+	}
+
+	return 0;
+}
+
+// Handle PDR/FAR changed and affect buffering
+int unix_sock_client_update(struct pdr *pdr)
+{
+	struct far *far = pdr->far;
+
+	unix_sock_client_delete(pdr);
+
+	if (far && (far->action & FAR_ACTION_BUFF))
+		return unix_sock_client_new(pdr);
+
+	return 0;
 }
 
 struct pdr *find_pdr_by_id(struct upf_dev *upf, u64 seid, u16 pdr_id)

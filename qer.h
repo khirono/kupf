@@ -33,5 +33,8 @@ struct qer {
 
 extern void qer_context_delete(struct qer *);
 extern struct qer *find_qer_by_id(struct upf_dev *, u64, u32);
+extern void qer_update(struct qer *, struct upf_dev *);
+extern void qer_append(u64, u32, struct qer *, struct upf_dev *);
+extern int qer_get_pdr_ids(u16 *, int, struct qer *, struct upf_dev *);
 
 #endif
