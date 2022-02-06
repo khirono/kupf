@@ -35,19 +35,15 @@ int upf_genl_add_pdr(struct sk_buff *skb, struct genl_info *info)
 	printk("info.nlhdr: %p\n", info->nlhdr);
 	printk("info.snd_portid: %u\n", info->snd_portid);
 
-	if (info->attrs[UPF_ATTR_LINK]) {
-		ifindex = nla_get_u32(info->attrs[UPF_ATTR_LINK]);
-	} else {
-		ifindex = -1;
+	if (!info->attrs[UPF_ATTR_LINK])
 		return -EINVAL;
-	}
+	ifindex = nla_get_u32(info->attrs[UPF_ATTR_LINK]);
 	printk("ifindex: %d\n", ifindex);
 
-	if (info->attrs[UPF_ATTR_NET_NS_FD]) {
+	if (info->attrs[UPF_ATTR_NET_NS_FD])
 		netnsfd = nla_get_u32(info->attrs[UPF_ATTR_NET_NS_FD]);
-	} else {
+	else
 		netnsfd = -1;
-	}
 	printk("netnsfd: %d\n", netnsfd);
 
 	rtnl_lock();
@@ -119,17 +115,15 @@ int upf_genl_del_pdr(struct sk_buff *skb, struct genl_info *info)
 
 	printk("<%s:%d> start\n", __func__, __LINE__);
 
-	if (!info->attrs[UPF_ATTR_LINK]) {
+	if (!info->attrs[UPF_ATTR_LINK])
 		return -EINVAL;
-	}
 	ifindex = nla_get_u32(info->attrs[UPF_ATTR_LINK]);
 	printk("ifindex: %d\n", ifindex);
 
-	if (info->attrs[UPF_ATTR_NET_NS_FD]) {
+	if (info->attrs[UPF_ATTR_NET_NS_FD])
 		netnsfd = nla_get_u32(info->attrs[UPF_ATTR_NET_NS_FD]);
-	} else {
+	else
 		netnsfd = -1;
-	}
 	printk("netnsfd: %d\n", netnsfd);
 
 	rcu_read_lock();
@@ -191,9 +185,8 @@ static int parse_pdi(struct nlattr *a)
 	printk("<%s:%d> start\n", __func__, __LINE__);
 
 	err = nla_parse_nested(attrs, UPF_ATTR_PDI_MAX, a, NULL, NULL);
-	if (err != 0) {
+	if (err)
 		return err;
-	}
 
 	if (attrs[UPF_ATTR_PDI_UE_ADDR_IPV4]) {
 		ue_addr = nla_get_be32(attrs[UPF_ATTR_PDI_UE_ADDR_IPV4]);
@@ -221,9 +214,8 @@ static int parse_f_teid(struct nlattr *a)
 	printk("<%s:%d> start\n", __func__, __LINE__);
 
 	err = nla_parse_nested(attrs, UPF_ATTR_F_TEID_MAX, a, NULL, NULL);
-	if (err != 0) {
+	if (err)
 		return err;
-	}
 
 	if (attrs[UPF_ATTR_F_TEID_I_TEID]) {
 		teid = htonl(nla_get_u32(attrs[UPF_ATTR_F_TEID_I_TEID]));

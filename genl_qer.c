@@ -25,17 +25,15 @@ int upf_genl_del_qer(struct sk_buff *skb, struct genl_info *info)
 
 	printk("<%s:%d> start\n", __func__, __LINE__);
 
-	if (!info->attrs[UPF_ATTR_LINK]) {
+	if (!info->attrs[UPF_ATTR_LINK])
 		return -EINVAL;
-	}
 	ifindex = nla_get_u32(info->attrs[UPF_ATTR_LINK]);
 	printk("ifindex: %d\n", ifindex);
 
-	if (info->attrs[UPF_ATTR_NET_NS_FD]) {
+	if (info->attrs[UPF_ATTR_NET_NS_FD])
 		netnsfd = nla_get_u32(info->attrs[UPF_ATTR_NET_NS_FD]);
-	} else {
+	else
 		netnsfd = -1;
-	}
 	printk("netnsfd: %d\n", netnsfd);
 
 	rcu_read_lock();

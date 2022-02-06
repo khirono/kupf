@@ -87,9 +87,8 @@ static int upf_newlink(struct net *net, struct net_device *dev,
 
 	printk("<%s: %d> start\n", __func__, __LINE__);
 
-	if (!data[IFLA_UPF_FD1]) {
+	if (!data[IFLA_UPF_FD1])
 		return -EINVAL;
-	}
 	fd1 = nla_get_u32(data[IFLA_UPF_FD1]);
 	sk = upf_encap_enable(fd1, UDP_ENCAP_GTP1U, upf);
 	if (IS_ERR(sk)) {
@@ -97,17 +96,15 @@ static int upf_newlink(struct net *net, struct net_device *dev,
 	}
 	upf->sk1u = sk;
 
-	if (data[IFLA_UPF_ROLE]) {
+	if (data[IFLA_UPF_ROLE])
 		upf->role = nla_get_u32(data[IFLA_UPF_ROLE]);
-	} else {
+	else
 		upf->role = UPF_ROLE_UPF;
-	}
 
-	if (!data[IFLA_UPF_PDR_HASHSIZE]) {
+	if (!data[IFLA_UPF_PDR_HASHSIZE])
 		hashsize = 1024;
-	} else {
+	else
 		hashsize = nla_get_u32(data[IFLA_UPF_PDR_HASHSIZE]);
-	}
 
 	err = upf_dev_hashtable_new(upf, hashsize);
 	if (err) {
@@ -116,7 +113,7 @@ static int upf_newlink(struct net *net, struct net_device *dev,
 	}
 
 	err = register_netdevice(dev);
-	if (err < 0) {
+	if (err) {
 		netdev_dbg(dev, "failed to register new netdev %d\n", err);
 		upf_dev_hashtable_free(upf);
 		upf_encap_disable(upf->sk1u);
@@ -135,7 +132,7 @@ static void upf_dellink(struct net_device *dev, struct list_head *head)
 
 	printk("<%s: %d> start\n", __func__, __LINE__);
 
-	// upf_hashtable_free(upf)
+	upf_dev_hashtable_free(upf);
 	list_del_rcu(&upf->list);
 	unregister_netdevice_queue(dev, head);
 }
@@ -154,9 +151,8 @@ static int upf_fill_info(struct sk_buff *skb, const struct net_device *dev)
 
 	printk("<%s: %d> start\n", __func__, __LINE__);
 
-	if (nla_put_u32(skb, IFLA_UPF_PDR_HASHSIZE, upf->hash_size)) {
+	if (nla_put_u32(skb, IFLA_UPF_PDR_HASHSIZE, upf->hash_size))
 		return -EMSGSIZE;
-	}
 
 	return 0;
 }

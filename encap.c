@@ -20,9 +20,8 @@ struct sock *upf_encap_enable(int fd, int type, struct upf_dev *upf)
 	int err;
 
 	sock = sockfd_lookup(fd, &err);
-	if (!sock) {
+	if (!sock)
 		return NULL;
-	}
 
 	if (sock->sk->sk_protocol != IPPROTO_UDP) {
 		sockfd_put(sock);
@@ -55,9 +54,8 @@ void upf_encap_disable(struct sock *sk)
 {
 	struct upf_dev *upf;
 
-	if (!sk) {
+	if (!sk)
 		return;
-	}
 
 	lock_sock(sk);
 	upf = sk->sk_user_data;
@@ -82,9 +80,8 @@ static int upf_encap_recv(struct sock *sk, struct sk_buff *skb)
 	struct upf_dev *upf;
 
 	upf = rcu_dereference_sk_user_data(sk);
-	if (!upf) {
+	if (!upf)
 		return 1;
-	}
 
 	if (udp_sk(sk)->encap_type != UDP_ENCAP_GTP1U) {
 		kfree_skb(skb);
