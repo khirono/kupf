@@ -28,7 +28,7 @@ struct ip_filter_rule {
 	struct in_addr dmask;
 	int sport_num;
 	struct range *sport;
-	int dprot_num;
+	int dport_num;
 	struct range *dport;
 };
 
