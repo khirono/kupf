@@ -32,5 +32,6 @@ struct upf_emark_pktinfo {
 
 extern void upf_fwd_emark_skb_ipv4(struct sk_buff *,
 		struct net_device *, struct upf_emark_pktinfo *);
+extern int ip_xmit(struct sk_buff *, struct sock *, struct net_device *);
 
 #endif

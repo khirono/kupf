@@ -82,3 +82,22 @@ void upf_fwd_emark_skb_ipv4(struct sk_buff *skb,
 			true,
 			true);
 }
+
+int ip_xmit(struct sk_buff *skb, struct sock *sk, struct net_device *upf_dev)
+{
+	struct iphdr *iph = ip_hdr(skb);
+	struct flowi4 fl4;
+	struct rtable *rt;
+
+	rt = ip4_find_route_simple(skb, sk, upf_dev, 0, iph->daddr, &fl4);
+	if (IS_ERR(rt)) {
+		return -EBADMSG;
+	}
+
+	skb_dst_set(skb, &rt->dst);
+
+	if (ip_local_out(dev_net(upf_dev), sk, skb) < 0) {
+		return -1;
+	}
+	return 0;
+}

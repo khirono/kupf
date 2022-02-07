@@ -65,6 +65,22 @@ enum {
 };
 #define UPF_ATTR_FLOW_DESCRIPTION_MAX (__UPF_ATTR_FLOW_DESCRIPTION_MAX - 1)
 
+enum {
+	UPF_SDF_FILTER_ACTION_UNSPEC,
+	UPF_SDF_FILTER_PERMIT,
+	__UPF_SDF_FILTER_ACTION_MAX,
+};
+#define UPF_SDF_FILTER_ACTION_MAX (__UPF_SDF_FILTER_ACTION_MAX - 1)
+
+enum {
+	UPF_SDF_FILTER_DIRECTION_UNSPEC,
+	UPF_SDF_FILTER_IN,
+	UPF_SDF_FILTER_OUT,
+	__UPF_SDF_FILTER_DIRECTION_MAX,
+};
+#define UPF_SDF_FILTER_DIRECTION_MAX (__UPF_SDF_FILTER_DIRECTION_MAX - 1)
+
+
 /* for kernel */
 extern int upf_genl_add_pdr(struct sk_buff *, struct genl_info *);
 extern int upf_genl_del_pdr(struct sk_buff *, struct genl_info *);

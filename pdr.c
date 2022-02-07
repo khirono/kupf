@@ -1,5 +1,9 @@
+#include <linux/version.h>
+
 #include "dev.h"
+#include "link.h"
 #include "pdr.h"
+#include "genl_pdr.h"
 #include "genl_far.h"
 #include "seid.h"
 #include "hash.h"
@@ -141,6 +145,143 @@ struct pdr *find_pdr_by_id(struct upf_dev *upf, u64 seid, u16 pdr_id)
 	hlist_for_each_entry_rcu(pdr, head, hlist_id) {
 		if (pdr->seid == seid && pdr->id == pdr_id)
 			return pdr;
+	}
+
+	return NULL;
+}
+
+static int ipv4_match(__be32 target_addr, __be32 ifa_addr, __be32 ifa_mask)
+{
+	return !((target_addr ^ ifa_addr) & ifa_mask);
+}
+
+static int ports_match(struct range *match_list, int list_len, __be16 port)
+{
+	int i;
+
+	if (!list_len)
+		return 1;
+
+	for (i = 0; i < list_len; i++) {
+		if (match_list[i].start <= port && match_list[i].end >= port)
+			return 1;
+	}
+	return 0;
+}
+
+static int sdf_filter_match(struct sdf_filter *sdf, struct sk_buff *skb,
+		unsigned int hdrlen, u8 direction)
+{
+	struct iphdr *iph;
+	struct ip_filter_rule *rule;
+	const __be16 *pptr;
+	__be16 _ports[2];
+
+	if (!sdf)
+		return 1;
+
+	if (!pskb_may_pull(skb, hdrlen + sizeof(struct iphdr)))
+		goto mismatch;
+
+	iph = (struct iphdr *)(skb->data + hdrlen);
+
+	if (sdf->rule) {
+		rule = sdf->rule;
+		if (rule->direction != direction)
+			goto mismatch;
+
+		if (rule->proto != 0xff && rule->proto != iph->protocol)
+			goto mismatch;
+
+		if (!ipv4_match(iph->saddr, rule->src.s_addr, rule->smask.s_addr))
+			goto mismatch;
+
+		if (!ipv4_match(iph->daddr, rule->dest.s_addr, rule->dmask.s_addr))
+			goto mismatch;
+
+		if (rule->sport_num + rule->dport_num > 0) {
+			if (!(pptr = skb_header_pointer(skb, hdrlen + sizeof(struct iphdr), sizeof(_ports), _ports)))
+			       	goto mismatch;
+
+			if (!ports_match(rule->sport, rule->sport_num, ntohs(pptr[0])))
+				goto mismatch;
+
+			if (!ports_match(rule->dport, rule->dport_num, ntohs(pptr[1])))
+				goto mismatch;
+		}
+	}
+
+/*
+	if (sdf->tos_traffic_class)
+		GTP5G_ERR(NULL, "TODO: SDF's ToS traffic class\n");
+
+	if (sdf->security_param_idx)
+		GTP5G_ERR(NULL, "TODO: SDF's Security parameter index\n");
+
+	if (sdf->flow_label)
+		GTP5G_ERR(NULL, "TODO: SDF's Flow label\n");
+
+	if (sdf->bi_id)
+		GTP5G_ERR(NULL, "TODO: SDF's SDF filter id\n");
+*/
+
+	return 1;
+mismatch:
+	return 0;
+}
+
+
+struct pdr *pdr_find_by_gtp1u(struct upf_dev *upf, struct sk_buff *skb,
+		unsigned int hdrlen, u32 teid)
+{
+	struct iphdr *iph;
+	struct iphdr *outer_iph;
+	__be32 *target_addr;
+	struct hlist_head *head;
+	struct pdr *pdr;
+	struct pdi *pdi;
+
+	if (!upf)
+		return NULL;
+
+	if (ntohs(skb->protocol) != ETH_P_IP)
+		return NULL;
+
+	if (!pskb_may_pull(skb, hdrlen + sizeof(struct iphdr)))
+		return NULL;
+
+	iph = (struct iphdr *)(skb->data + hdrlen);
+	target_addr = (upf->role == UPF_ROLE_UPF ? &iph->saddr : &iph->daddr);
+
+	head = &upf->i_teid_hash[u32_hashfn(teid) % upf->hash_size];
+	hlist_for_each_entry_rcu(pdr, head, hlist_i_teid) {
+		pdi = pdr->pdi;
+		if (!pdi)
+			continue;
+
+		// GTP-U packet must check teid
+		if (!(pdi->f_teid && pdi->f_teid->teid == teid))
+			continue;
+		// check outer IP dest addr to distinguish between N3 and N9 packet whil e act as i-upf
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)
+		outer_iph = (struct iphdr *)(skb->head + skb->network_header);
+		if (!(pdi->f_teid && pdi->f_teid->gtpu_addr_ipv4.s_addr == outer_iph->daddr))
+			continue;
+#else
+		outer_iph = (struct iphdr *)(skb->network_header);
+		if (!(pdi->f_teid && pdi->f_teid->gtpu_addr_ipv4.s_addr == outer_iph->daddr))
+			continue;
+#endif
+
+		if (pdi->ue_addr_ipv4)
+			if (!(pdr->af == AF_INET && *target_addr == pdi->ue_addr_ipv4->s_addr))
+				continue;
+
+		if (pdi->sdf)
+			if (!sdf_filter_match(pdi->sdf, skb, hdrlen, UPF_SDF_FILTER_OUT))
+				continue;
+
+		return pdr;
 	}
 
 	return NULL;
