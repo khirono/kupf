@@ -85,4 +85,7 @@ extern void unix_sock_client_delete(struct pdr *);
 extern int unix_sock_client_new(struct pdr *);
 extern int unix_sock_client_update(struct pdr *);
 
+extern void pdr_append(u64, u16, struct pdr *, struct upf_dev *);
+extern void pdr_update_hlist_table(struct pdr *, struct upf_dev *);
+
 #endif

@@ -106,3 +106,16 @@ int qer_get_pdr_ids(u16 *ids, int n, struct qer *qer, struct upf_dev *upf)
 	}
 	return i;
 }
+
+void qer_set_pdr(u64 seid, u32 qer_id, struct hlist_node *node, struct upf_dev *upf)
+{
+	char *seid_qer_id_hexstr;
+	u32 i;
+
+	if (!hlist_unhashed(node))
+		hlist_del_rcu(node);
+
+	seid_qer_id_hexstr = seid_qer_id_to_hex_str(seid, qer_id);
+	i = str_hashfn(seid_qer_id_hexstr) % upf->hash_size;
+	hlist_add_head_rcu(node, &upf->related_qer_hash[i]);
+}

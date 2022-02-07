@@ -12,9 +12,11 @@
 #include "pdr.h"
 
 
-static int parse_pdi(struct nlattr *);
-static int parse_f_teid(struct nlattr *);
-static int parse_sdf_filter(struct nlattr *);
+static int pdr_fill(struct pdr *, struct upf_dev *, struct genl_info *);
+static int parse_pdi(struct pdr *, struct nlattr *);
+static int parse_f_teid(struct pdi *, struct nlattr *);
+static int parse_sdf_filter(struct pdi *, struct nlattr *);
+static int parse_ip_filter_rule(struct sdf_filter *, struct nlattr *);
 
 static int upf_genl_fill_pdr(struct sk_buff *, u32, u32, u32, struct pdr *);
 static int upf_genl_fill_rule(struct sk_buff *, struct ip_filter_rule *);
@@ -26,14 +28,12 @@ static int upf_genl_fill_pdi(struct sk_buff *, struct pdi *);
 int upf_genl_add_pdr(struct sk_buff *skb, struct genl_info *info)
 {
 	struct upf_dev *upf;
+	struct pdr *pdr;
 	int ifindex;
 	int netnsfd;
 	u64 seid;
 	u16 pdr_id;
-	u32 precedence;
-	u8 removal;
-	u32 far_id;
-	u32 qer_id;
+	int err;
 
 	printk("<%s:%d> start\n", __func__, __LINE__);
 
@@ -78,31 +78,69 @@ int upf_genl_add_pdr(struct sk_buff *skb, struct genl_info *info)
 		return -ENODEV;
 	}
 
-	if (info->attrs[UPF_ATTR_PDR_PRECEDENCE]) {
-		precedence = nla_get_u32(info->attrs[UPF_ATTR_PDR_PRECEDENCE]);
-		printk("precedence: %u\n", precedence);
+	pdr = find_pdr_by_id(upf, seid, pdr_id);
+	if (pdr) {
+		if (info->nlhdr->nlmsg_flags & NLM_F_EXCL) {
+			rcu_read_unlock();
+			rtnl_unlock();
+			return -EEXIST;
+		}
+		if (!(info->nlhdr->nlmsg_flags & NLM_F_REPLACE)) {
+			rcu_read_unlock();
+			rtnl_unlock();
+			return -EOPNOTSUPP;
+		}
+
+		err = pdr_fill(pdr, upf, info);
+		if (err) {
+			pdr_context_delete(pdr);
+			return err;
+		}
+
+		rcu_read_unlock();
+		rtnl_unlock();
+		return 0;
 	}
 
-	if (info->attrs[UPF_ATTR_PDR_PDI]) {
-		parse_pdi(info->attrs[UPF_ATTR_PDR_PDI]);
+	if (info->nlhdr->nlmsg_flags & NLM_F_REPLACE) {
+		rcu_read_unlock();
+		rtnl_unlock();
+		return -ENOENT;
 	}
 
-	if (info->attrs[UPF_ATTR_OUTER_HEADER_REMOVAL]) {
-		removal = nla_get_u8(info->attrs[UPF_ATTR_OUTER_HEADER_REMOVAL]);
-		printk("removal: %u\n", removal);
+	if (info->nlhdr->nlmsg_flags & NLM_F_APPEND) {
+		rcu_read_unlock();
+		rtnl_unlock();
+		return -EOPNOTSUPP;
 	}
 
-	if (info->attrs[UPF_ATTR_PDR_FAR_ID]) {
-		far_id = nla_get_u32(info->attrs[UPF_ATTR_PDR_FAR_ID]);
-		printk("far_id: %u\n", far_id);
+	// Check only at the creation part
+	if (!info->attrs[UPF_ATTR_PDR_PRECEDENCE]) {
+		rcu_read_unlock();
+		rtnl_unlock();
+		return -EINVAL;
 	}
 
-	if (info->attrs[UPF_ATTR_PDR_QER_ID]) {
-		qer_id = nla_get_u32(info->attrs[UPF_ATTR_PDR_QER_ID]);
-		printk("qer_id: %u\n", qer_id);
+	pdr = kzalloc(sizeof(*pdr), GFP_ATOMIC);
+	if (!pdr) {
+		rcu_read_unlock();
+		rtnl_unlock();
+		return -ENOMEM;
 	}
 
-	notify(0x9876);
+	sock_hold(upf->sk1u);
+	pdr->sk = upf->sk1u;
+	pdr->dev = upf->dev;
+
+	err = pdr_fill(pdr, upf, info);
+	if (err) {
+		pdr_context_delete(pdr);
+		rcu_read_unlock();
+		rtnl_unlock();
+		return err;
+	}
+
+	pdr_append(seid, pdr_id, pdr, upf);
 
 	rcu_read_unlock();
 	rtnl_unlock();
@@ -302,10 +340,86 @@ out:
 }
 
 
-static int parse_pdi(struct nlattr *a)
+static int pdr_fill(struct pdr *pdr, struct upf_dev *upf, struct genl_info *info)
+{
+	char *str;
+	int err;
+
+	if (!pdr)
+		return -EINVAL;
+
+	pdr->af = AF_INET;
+	pdr->id = nla_get_u16(info->attrs[UPF_ATTR_PDR_ID]);
+	if (info->attrs[UPF_ATTR_PDR_SEID])
+		pdr->seid = nla_get_u64(info->attrs[UPF_ATTR_PDR_SEID]);
+	else
+		pdr->seid = 0;
+
+	if (info->attrs[UPF_ATTR_PDR_PRECEDENCE])
+		pdr->precedence = nla_get_u32(info->attrs[UPF_ATTR_PDR_PRECEDENCE]);
+
+	if (info->attrs[UPF_ATTR_OUTER_HEADER_REMOVAL]) {
+		if (!pdr->outer_header_removal) {
+			pdr->outer_header_removal = kzalloc(sizeof(*pdr->outer_header_removal), GFP_ATOMIC);
+			if (!pdr->outer_header_removal)
+				return -ENOMEM;
+		}
+		*pdr->outer_header_removal = nla_get_u8(info->attrs[UPF_ATTR_OUTER_HEADER_REMOVAL]);
+	}
+
+	/* Not in 3GPP spec, just used for routing */
+	if (info->attrs[UPF_ATTR_PDR_ROLE_ADDR_IPV4]) {
+		pdr->role_addr_ipv4.s_addr = nla_get_u32(info->attrs[UPF_ATTR_PDR_ROLE_ADDR_IPV4]);
+	}
+
+	/* Not in 3GPP spec, just used for buffering */
+	if (info->attrs[UPF_ATTR_PDR_UNIX_SOCKET_PATH]) {
+		str = nla_data(info->attrs[UPF_ATTR_PDR_UNIX_SOCKET_PATH]);
+		pdr->addr_unix.sun_family = AF_UNIX;
+		strncpy(pdr->addr_unix.sun_path, str, nla_len(info->attrs[UPF_ATTR_PDR_UNIX_SOCKET_PATH]));
+	}
+
+	if (info->attrs[UPF_ATTR_PDR_FAR_ID]) {
+		if (!pdr->far_id) {
+			pdr->far_id = kzalloc(sizeof(*pdr->far_id), GFP_ATOMIC);
+			if (!pdr->far_id)
+				return -ENOMEM;
+		}
+		*pdr->far_id = nla_get_u32(info->attrs[UPF_ATTR_PDR_FAR_ID]);
+		pdr->far = find_far_by_id(upf, pdr->seid, *pdr->far_id);
+		far_set_pdr(pdr->seid, *pdr->far_id, &pdr->hlist_related_far, upf);
+	}
+
+	if (info->attrs[UPF_ATTR_PDR_QER_ID]) {
+		if (!pdr->qer_id) {
+			pdr->qer_id = kzalloc(sizeof(*pdr->qer_id), GFP_ATOMIC);
+			if (!pdr->qer_id)
+				return -ENOMEM;
+		}
+		*pdr->qer_id = nla_get_u32(info->attrs[UPF_ATTR_PDR_QER_ID]);
+		pdr->qer = find_qer_by_id(upf, pdr->seid, *pdr->qer_id);
+		qer_set_pdr(pdr->seid, *pdr->qer_id, &pdr->hlist_related_qer, upf);
+	}
+
+	if (unix_sock_client_update(pdr) < 0)
+		return -EINVAL;
+
+	if (info->attrs[UPF_ATTR_PDR_PDI]) {
+		err = parse_pdi(pdr, info->attrs[UPF_ATTR_PDR_PDI]);
+		if (err)
+			return err;
+	}
+
+	// Update hlist table
+	pdr_update_hlist_table(pdr, upf);
+
+	return 0;
+}
+
+static int parse_pdi(struct pdr *pdr, struct nlattr *a)
 {
 	struct nlattr *attrs[UPF_ATTR_PDI_MAX + 1];
-	u32 ue_addr;
+	struct pdi *pdi;
 	int err;
 
 	printk("<%s:%d> start\n", __func__, __LINE__);
@@ -314,27 +428,42 @@ static int parse_pdi(struct nlattr *a)
 	if (err)
 		return err;
 
+	if (!pdr->pdi) {
+		pdr->pdi = kzalloc(sizeof(*pdr->pdi), GFP_ATOMIC);
+		if (!pdr->pdi)
+			return -ENOMEM;
+	}
+	pdi = pdr->pdi;
+
 	if (attrs[UPF_ATTR_PDI_UE_ADDR_IPV4]) {
-		ue_addr = nla_get_be32(attrs[UPF_ATTR_PDI_UE_ADDR_IPV4]);
-		printk("UE Addr: %08x\n", ue_addr);
+		if (!pdi->ue_addr_ipv4) {
+			pdi->ue_addr_ipv4 = kzalloc(sizeof(*pdi->ue_addr_ipv4), GFP_ATOMIC);
+			if (!pdi->ue_addr_ipv4)
+				return -ENOMEM;
+		}
+		pdi->ue_addr_ipv4->s_addr = nla_get_be32(attrs[UPF_ATTR_PDI_UE_ADDR_IPV4]);
+		printk("UE Addr: %08x\n", pdi->ue_addr_ipv4->s_addr);
 	}
 
 	if (attrs[UPF_ATTR_PDI_F_TEID]) {
-		parse_f_teid(attrs[UPF_ATTR_PDI_F_TEID]);
+		err = parse_f_teid(pdi, attrs[UPF_ATTR_PDI_F_TEID]);
+		if (err)
+			return err;
 	}
 
 	if (attrs[UPF_ATTR_PDI_SDF_FILTER]) {
-		parse_sdf_filter(attrs[UPF_ATTR_PDI_SDF_FILTER]);
+		err = parse_sdf_filter(pdi, attrs[UPF_ATTR_PDI_SDF_FILTER]);
+		if (err)
+			return err;
 	}
 
 	return 0;
 }
 
-static int parse_f_teid(struct nlattr *a)
+static int parse_f_teid(struct pdi *pdi, struct nlattr *a)
 {
 	struct nlattr *attrs[UPF_ATTR_F_TEID_MAX + 1];
-	u32 teid;
-	u32 gtpu_addr;
+	struct local_f_teid *f_teid;
 	int err;
 
 	printk("<%s:%d> start\n", __func__, __LINE__);
@@ -343,22 +472,180 @@ static int parse_f_teid(struct nlattr *a)
 	if (err)
 		return err;
 
-	if (attrs[UPF_ATTR_F_TEID_I_TEID]) {
-		teid = htonl(nla_get_u32(attrs[UPF_ATTR_F_TEID_I_TEID]));
-		printk("TEID: %u\n", teid);
+	if (!attrs[UPF_ATTR_F_TEID_I_TEID])
+		return -EINVAL;
+
+	if (!attrs[UPF_ATTR_F_TEID_GTPU_ADDR_IPV4])
+		return -EINVAL;
+
+	if (!pdi->f_teid) {
+		 pdi->f_teid = kzalloc(sizeof(*pdi->f_teid), GFP_ATOMIC);
+		 if (!pdi->f_teid)
+			 return -ENOMEM;
+	}
+	f_teid = pdi->f_teid;
+
+	f_teid->teid = htonl(nla_get_u32(attrs[UPF_ATTR_F_TEID_I_TEID]));
+	printk("TEID: %u\n", f_teid->teid);
+
+	f_teid->gtpu_addr_ipv4.s_addr = nla_get_be32(attrs[UPF_ATTR_F_TEID_GTPU_ADDR_IPV4]);
+	printk("GTP-U Addr: %08x\n", f_teid->gtpu_addr_ipv4.s_addr);
+
+	return 0;
+}
+
+static int parse_sdf_filter(struct pdi *pdi, struct nlattr *a)
+{
+	struct nlattr *attrs[UPF_ATTR_SDF_FILTER_MAX + 1];
+	struct sdf_filter *sdf;
+	int err;
+
+	printk("<%s:%d> start\n", __func__, __LINE__);
+
+	err = nla_parse_nested(attrs, UPF_ATTR_SDF_FILTER_MAX, a, NULL, NULL);
+	if (err)
+		return err;
+
+	if (!pdi->sdf) {
+		pdi->sdf = kzalloc(sizeof(*pdi->sdf), GFP_ATOMIC);
+		if (!pdi->sdf)
+			return -ENOMEM;
+	}
+	sdf = pdi->sdf;
+
+	if (attrs[UPF_ATTR_SDF_FILTER_FLOW_DESCRIPTION]) {
+		err = parse_ip_filter_rule(sdf, attrs[UPF_ATTR_SDF_FILTER_FLOW_DESCRIPTION]);
+		if (err)
+			return err;
 	}
 
-	if (attrs[UPF_ATTR_F_TEID_GTPU_ADDR_IPV4]) {
-		gtpu_addr = nla_get_be32(attrs[UPF_ATTR_F_TEID_GTPU_ADDR_IPV4]);
-		printk("GTP-U Addr: %08x\n", gtpu_addr);
+	if (attrs[UPF_ATTR_SDF_FILTER_TOS_TRAFFIC_CLASS]) {
+		if (!sdf->tos_traffic_class) {
+			sdf->tos_traffic_class = kzalloc(sizeof(*sdf->tos_traffic_class), GFP_ATOMIC);
+			if (!sdf->tos_traffic_class)
+				return -ENOMEM;
+		}
+		*sdf->tos_traffic_class = nla_get_u16(attrs[UPF_ATTR_SDF_FILTER_TOS_TRAFFIC_CLASS]);
+	}
+
+	if (attrs[UPF_ATTR_SDF_FILTER_SECURITY_PARAMETER_INDEX]) {
+		if (!sdf->security_param_idx) {
+			sdf->security_param_idx = kzalloc(sizeof(*sdf->security_param_idx), GFP_ATOMIC);
+			if (!sdf->security_param_idx)
+				return -ENOMEM;
+                }
+		*sdf->security_param_idx = nla_get_u32(attrs[UPF_ATTR_SDF_FILTER_SECURITY_PARAMETER_INDEX]);
+	}
+
+	if (attrs[UPF_ATTR_SDF_FILTER_FLOW_LABEL]) {
+		if (!sdf->flow_label) {
+			sdf->flow_label = kzalloc(sizeof(*sdf->flow_label), GFP_ATOMIC);
+			if (!sdf->flow_label)
+				return -ENOMEM;
+                }
+		*sdf->flow_label = nla_get_u32(attrs[UPF_ATTR_SDF_FILTER_FLOW_LABEL]);
+	}
+
+	if (attrs[UPF_ATTR_SDF_FILTER_SDF_FILTER_ID]) {
+		if (!sdf->bi_id) {
+			sdf->bi_id = kzalloc(sizeof(*sdf->bi_id), GFP_ATOMIC);
+			if (!sdf->bi_id) {
+				return -ENOMEM;
+			}
+		}
+		*sdf->bi_id = nla_get_u32(attrs[UPF_ATTR_SDF_FILTER_SDF_FILTER_ID]);
 	}
 
 	return 0;
 }
 
-static int parse_sdf_filter(struct nlattr *a)
+static int parse_ip_filter_rule(struct sdf_filter *sdf, struct nlattr *a)
 {
+	struct nlattr *attrs[UPF_ATTR_FLOW_DESCRIPTION_MAX + 1];
+	struct ip_filter_rule *rule;
+	int err;
+	int i;
+
 	printk("<%s:%d> start\n", __func__, __LINE__);
+
+	err = nla_parse_nested(attrs, UPF_ATTR_FLOW_DESCRIPTION_MAX, a, NULL, NULL);
+	if (err)
+		return err;
+
+	if (!attrs[UPF_ATTR_FLOW_DESCRIPTION_ACTION])
+		return -EINVAL;
+	if (!attrs[UPF_ATTR_FLOW_DESCRIPTION_DIRECTION])
+		return -EINVAL;
+	if (!attrs[UPF_ATTR_FLOW_DESCRIPTION_PROTOCOL])
+		return -EINVAL;
+	if (!attrs[UPF_ATTR_FLOW_DESCRIPTION_SRC_IPV4])
+		return -EINVAL;
+	if (!attrs[UPF_ATTR_FLOW_DESCRIPTION_DEST_IPV4])
+		return -EINVAL;
+
+	if (!sdf->rule) {
+		sdf->rule = kzalloc(sizeof(*sdf->rule), GFP_ATOMIC);
+		if (!sdf->rule)
+			return -ENOMEM;
+	}
+	rule = sdf->rule;
+
+	rule->action = nla_get_u8(attrs[UPF_ATTR_FLOW_DESCRIPTION_ACTION]);
+	rule->direction = nla_get_u8(attrs[UPF_ATTR_FLOW_DESCRIPTION_DIRECTION]);
+	rule->proto = nla_get_u8(attrs[UPF_ATTR_FLOW_DESCRIPTION_PROTOCOL]);
+	rule->src.s_addr = nla_get_be32(attrs[UPF_ATTR_FLOW_DESCRIPTION_SRC_IPV4]);
+	rule->dest.s_addr = nla_get_be32(attrs[UPF_ATTR_FLOW_DESCRIPTION_DEST_IPV4]);
+	if (attrs[UPF_ATTR_FLOW_DESCRIPTION_SRC_MASK])
+		rule->smask.s_addr = nla_get_be32(attrs[UPF_ATTR_FLOW_DESCRIPTION_SRC_MASK]);
+	else
+		rule->smask.s_addr = -1;
+
+	if (attrs[UPF_ATTR_FLOW_DESCRIPTION_DEST_MASK])
+		rule->dmask.s_addr = nla_get_be32(attrs[UPF_ATTR_FLOW_DESCRIPTION_DEST_MASK]);
+	else
+		rule->dmask.s_addr = -1;
+
+	if (attrs[UPF_ATTR_FLOW_DESCRIPTION_SRC_PORT]) {
+		u32 *sport_encode = nla_data(attrs[UPF_ATTR_FLOW_DESCRIPTION_SRC_PORT]);
+		rule->sport_num = nla_len(attrs[UPF_ATTR_FLOW_DESCRIPTION_SRC_PORT]) / sizeof(u32);
+		if (rule->sport)
+			kfree(rule->sport);
+		rule->sport = kzalloc(rule->sport_num * sizeof(*rule->sport), GFP_ATOMIC);
+		if (!rule->sport)
+			return -ENOMEM;
+
+		for (i = 0; i < rule->sport_num; i++) {
+			if ((sport_encode[i] & 0xFFFF) <= (sport_encode[i] >> 16)) {
+				rule->sport[i].start = (sport_encode[i] & 0xFFFF);
+				rule->sport[i].end = (sport_encode[i] >> 16);
+			} else {
+				rule->sport[i].start = (sport_encode[i] >> 16);
+				rule->sport[i].end = (sport_encode[i] & 0xFFFF);
+			}
+		}
+	}
+
+	if (attrs[UPF_ATTR_FLOW_DESCRIPTION_DEST_PORT]) {
+		u32 *dport_encode = nla_data(attrs[UPF_ATTR_FLOW_DESCRIPTION_DEST_PORT]);
+		rule->dport_num = nla_len(attrs[UPF_ATTR_FLOW_DESCRIPTION_DEST_PORT]) / sizeof(u32);
+
+		if (rule->dport)
+			kfree(rule->dport);
+
+		rule->dport = kzalloc(rule->dport_num * sizeof(*rule->dport), GFP_ATOMIC);
+		if (!rule->dport)
+			return -ENOMEM;
+
+		for (i = 0; i < rule->dport_num; i++) {
+			if ((dport_encode[i] & 0xFFFF) <= (dport_encode[i] >> 16)) {
+				rule->dport[i].start = (dport_encode[i] & 0xFFFF);
+				rule->dport[i].end = (dport_encode[i] >> 16);
+			} else {
+				rule->dport[i].start = (dport_encode[i] >> 16);
+				rule->dport[i].end = (dport_encode[i] & 0xFFFF);
+			}
+		}
+	}
 
 	return 0;
 }

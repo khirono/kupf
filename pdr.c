@@ -145,3 +145,61 @@ struct pdr *find_pdr_by_id(struct upf_dev *upf, u64 seid, u16 pdr_id)
 
 	return NULL;
 }
+
+void pdr_append(u64 seid, u16 pdr_id, struct pdr *pdr, struct upf_dev *upf)
+{
+	char *seid_pdr_id_hexstr;
+	u32 i;
+
+	seid_pdr_id_hexstr = seid_pdr_id_to_hex_str(seid, pdr_id);
+	i = str_hashfn(seid_pdr_id_hexstr) % upf->hash_size;
+	hlist_add_head_rcu(&pdr->hlist_id, &upf->pdr_id_hash[i]);
+}
+
+void pdr_update_hlist_table(struct pdr *pdr, struct upf_dev *upf)
+{
+	struct hlist_head *head;
+	struct pdr *ppdr;
+	struct pdr *last_ppdr;
+	struct pdi *pdi;
+	struct local_f_teid *f_teid;
+
+	if (!hlist_unhashed(&pdr->hlist_i_teid))
+		hlist_del_rcu(&pdr->hlist_i_teid);
+
+	if (!hlist_unhashed(&pdr->hlist_addr))
+		hlist_del_rcu(&pdr->hlist_addr);
+
+	pdi = pdr->pdi;
+	if (!pdi)
+		return;
+
+	f_teid = pdi->f_teid;
+	if (f_teid) {
+		last_ppdr = NULL;
+		head = &upf->i_teid_hash[u32_hashfn(f_teid->teid) % upf->hash_size];
+		hlist_for_each_entry_rcu(ppdr, head, hlist_i_teid) {
+			if (pdr->precedence > ppdr->precedence)
+				last_ppdr = ppdr;
+			else
+				break;
+		}
+		if (!last_ppdr)
+			hlist_add_head_rcu(&pdr->hlist_i_teid, head);
+		else
+			hlist_add_behind_rcu(&pdr->hlist_i_teid, &last_ppdr->hlist_i_teid);
+	} else if (pdi->ue_addr_ipv4) {
+		last_ppdr = NULL;
+		head = &upf->addr_hash[u32_hashfn(pdi->ue_addr_ipv4->s_addr) % upf->hash_size];
+		hlist_for_each_entry_rcu(ppdr, head, hlist_addr) {
+			if (pdr->precedence > ppdr->precedence)
+				last_ppdr = ppdr;
+			else
+				break;
+		}
+		if (!last_ppdr)
+			hlist_add_head_rcu(&pdr->hlist_addr, head);
+		else
+			hlist_add_behind_rcu(&pdr->hlist_addr, &last_ppdr->hlist_addr);
+	}
+}
