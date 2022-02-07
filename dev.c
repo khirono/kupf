@@ -9,6 +9,8 @@
 #include "pdr.h"
 #include "far.h"
 #include "qer.h"
+#include "genl_far.h"
+#include "pktinfo.h"
 
 
 struct upf_dev *find_upf_dev(struct net *src_net, int ifindex, int netnsfd)
@@ -147,12 +149,40 @@ static void upf_dev_uninit(struct net_device *dev)
 
 static netdev_tx_t upf_dev_xmit(struct sk_buff *skb, struct net_device *dev)
 {
+	unsigned int proto = ntohs(skb->protocol);
+	struct upf_pktinfo pktinfo;
+	int ret;
+
 	printk("<%s: %d> start\n", __func__, __LINE__);
 
-	skb_dump("packet:", skb, 1);
+	/* Ensure there is sufficient headroom */
+	if (skb_cow_head(skb, dev->needed_headroom)) {
+		goto tx_err;
+	}
 
-	notify(3);
+	skb_reset_inner_headers(skb);
 
+	/* PDR lookups in gtp5g_build_skb_*() need rcu read-side lock.
+	 * */
+	rcu_read_lock();
+	switch (proto) {
+	case ETH_P_IP:
+		ret = upf_handle_skb_ipv4(skb, dev, &pktinfo);
+		break;
+	default:
+		ret = -EOPNOTSUPP;
+	}
+	rcu_read_unlock();
+
+	if (ret < 0)
+		goto tx_err;
+
+	if (ret == FAR_ACTION_FORW)
+		upf_xmit_skb_ipv4(skb, &pktinfo);
+
+	return NETDEV_TX_OK;
+tx_err:
+	dev->stats.tx_errors++;
 	dev_kfree_skb(skb);
 	return NETDEV_TX_OK;
 }

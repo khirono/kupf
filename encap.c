@@ -11,6 +11,7 @@
 #include <net/udp_tunnel.h>
 
 #include "dev.h"
+#include "link.h"
 #include "encap.h"
 #include "gtp.h"
 #include "pdr.h"
@@ -25,6 +26,8 @@ static int upf_rx(struct pdr *, struct sk_buff *, unsigned int, unsigned int);
 static int upf_fwd_skb_encap(struct sk_buff *, struct net_device *,
 		unsigned int, struct pdr *);
 static int unix_sock_send(struct pdr *, void *, u32);
+static int upf_fwd_skb_ipv4(struct sk_buff *,
+		struct net_device *, struct upf_pktinfo *, struct pdr *);
 
 
 struct sock *upf_encap_enable(int fd, int type, struct upf_dev *upf)
@@ -319,4 +322,100 @@ static int upf_fwd_skb_encap(struct sk_buff *skb, struct net_device *dev,
 
 	netif_rx(skb);
 	return 0;
+}
+
+int upf_handle_skb_ipv4(struct sk_buff *skb, struct net_device *dev,
+		struct upf_pktinfo *pktinfo)
+{
+	struct upf_dev *upf = netdev_priv(dev);
+	struct pdr *pdr;
+	struct far *far;
+	struct iphdr *iph;
+
+	/* Read the IP destination address and resolve the PDR.
+	 * Prepend PDR header with TEI/TID from PDR.
+	 */
+	iph = ip_hdr(skb);
+	if (upf->role == UPF_ROLE_UPF)
+		pdr = pdr_find_by_ipv4(upf, skb, 0, iph->daddr);
+	else
+		pdr = pdr_find_by_ipv4(upf, skb, 0, iph->saddr);
+
+	if (!pdr)
+		return -ENOENT;
+
+	far = pdr->far;
+	if (far) {
+		// One and only one of the DROP, FORW and BUFF flags shall be set to 1.
+		// The NOCP flag may only be set if the BUFF flag is set.
+		// The DUPL flag may be set with any of the DROP, FORW, BUFF and NOCP flags.
+		switch (far->action & FAR_ACTION_MASK) {
+		case FAR_ACTION_DROP:
+			++pdr->dl_drop_cnt;
+			dev_kfree_skb(skb);
+			return FAR_ACTION_DROP;
+		case FAR_ACTION_BUFF:
+			// TODO: handle nonlinear part
+			if (unix_sock_send(pdr, skb->data, skb_headlen(skb)) < 0)
+				pdr->dl_drop_cnt++;
+			dev_kfree_skb(skb);
+			return FAR_ACTION_BUFF;
+		case FAR_ACTION_FORW:
+			return upf_fwd_skb_ipv4(skb, dev, pktinfo, pdr);
+		}
+	}
+
+	return -ENOENT;
+}
+
+static int upf_fwd_skb_ipv4(struct sk_buff *skb,
+		struct net_device *dev, struct upf_pktinfo *pktinfo,
+		struct pdr *pdr)
+{
+	struct rtable *rt;
+	struct flowi4 fl4;
+	struct iphdr *iph = ip_hdr(skb);
+	struct outer_header_creation *hdr_creation;
+
+	if (!(pdr->far && pdr->far->fwd_param &&
+				pdr->far->fwd_param->hdr_creation)) {
+		goto err;
+	}
+
+	hdr_creation = pdr->far->fwd_param->hdr_creation;
+	rt = ip4_find_route(skb,
+			iph,
+			pdr->sk,
+			dev,
+			pdr->role_addr_ipv4.s_addr,
+			hdr_creation->peer_addr_ipv4.s_addr,
+			&fl4);
+	if (IS_ERR(rt))
+		goto err;
+
+	if (!pdr->qer) {
+		upf_set_pktinfo_ipv4(pktinfo,
+				pdr->sk,
+				iph,
+				hdr_creation,
+				NULL,
+				rt,
+				&fl4,
+				dev);
+	} else {
+		upf_set_pktinfo_ipv4(pktinfo,
+				pdr->sk,
+				iph,
+				hdr_creation,
+				pdr->qer,
+				rt,
+				&fl4,
+				dev);
+	}
+
+	upf_push_header(skb, pktinfo);
+
+	return FAR_ACTION_FORW;
+err:
+	return -EBADMSG;
 }

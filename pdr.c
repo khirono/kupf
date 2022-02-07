@@ -287,6 +287,32 @@ struct pdr *pdr_find_by_gtp1u(struct upf_dev *upf, struct sk_buff *skb,
 	return NULL;
 }
 
+struct pdr *pdr_find_by_ipv4(struct upf_dev *upf, struct sk_buff *skb,
+		unsigned int hdrlen, __be32 addr)
+{
+	struct hlist_head *head;
+	struct pdr *pdr;
+	struct pdi *pdi;
+
+	head = &upf->addr_hash[ipv4_hashfn(addr) % upf->hash_size];
+
+	hlist_for_each_entry_rcu(pdr, head, hlist_addr) {
+		pdi = pdr->pdi;
+
+		// TODO: Move the value we check into first level
+		if (!(pdr->af == AF_INET && pdi->ue_addr_ipv4->s_addr == addr))
+			continue;
+
+		if (pdi->sdf)
+			if (!sdf_filter_match(pdi->sdf, skb, hdrlen, UPF_SDF_FILTER_OUT))
+				continue;
+
+		return pdr;
+	}
+
+	return NULL;
+}
+
 void pdr_append(u64 seid, u16 pdr_id, struct pdr *pdr, struct upf_dev *upf)
 {
 	char *seid_pdr_id_hexstr;
