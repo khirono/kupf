@@ -5,6 +5,8 @@
 #include <linux/rculist.h>
 #include <linux/net.h>
 
+#include "dev.h"
+
 struct qer {
 	struct hlist_node hlist_id;
 	u64 seid;
