@@ -14,10 +14,14 @@ struct upf_dev {
 	struct hlist_head *pdr_id_hash;
 	struct hlist_head *far_id_hash;
 	struct hlist_head *qer_id_hash;
+	struct hlist_head *bar_id_hash;
+	struct hlist_head *urr_id_hash;
 	struct hlist_head *i_teid_hash;
 	struct hlist_head *addr_hash;
 	struct hlist_head *related_far_hash;
 	struct hlist_head *related_qer_hash;
+	struct hlist_head *related_bar_hash;
+	struct hlist_head *related_urr_hash;
 };
 
 extern const struct net_device_ops upf_netdev_ops;

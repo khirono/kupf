@@ -12,6 +12,7 @@
 
 #include "far.h"
 #include "qer.h"
+#include "urr.h"
 
 struct local_f_teid {
 	u32 teid;
@@ -52,6 +53,7 @@ struct pdr {
 	struct hlist_node hlist_addr;
 	struct hlist_node hlist_related_far;
 	struct hlist_node hlist_related_qer;
+	struct hlist_node hlist_related_urr;
 
 	u64 seid;
 	u16 id;
@@ -62,6 +64,8 @@ struct pdr {
 	struct far *far;
 	u32 *qer_id;
 	struct qer *qer;
+	u32 *urr_id;
+	struct urr *urr;
 
 	/* deprecated: AF_UNIX socket for buffer */
 	struct sockaddr_un addr_unix;

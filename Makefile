@@ -9,7 +9,26 @@ CFLAGS += -ggdb
 EXTRA_CFLAGS += -Wno-misleading-indentation -Wuninitialized
 
 obj-m := $(MODULE_NAME).o
-upf-y := main.o dev.o gtp.o pktinfo.o hash.o seid.o encap.o genl.o genl_pdr.o genl_far.o genl_qer.o pdr.o far.o qer.o net.o link.o
+upf-y := main.o
+upf-y += dev.o
+upf-y += gtp.o
+upf-y += pktinfo.o
+upf-y += hash.o
+upf-y += seid.o
+upf-y += encap.o
+upf-y += genl.o
+upf-y += genl_pdr.o
+upf-y += genl_far.o
+upf-y += genl_qer.o
+upf-y += genl_bar.o
+upf-y += genl_urr.o
+upf-y += pdr.o
+upf-y += far.o
+upf-y += qer.o
+upf-y += bar.o
+upf-y += urr.o
+upf-y += net.o
+upf-y += link.o
 
 all:
 	make -C $(INCLUDE_DIR) M=$(PWD) modules

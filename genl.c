@@ -5,6 +5,8 @@
 #include "genl_pdr.h"
 #include "genl_far.h"
 #include "genl_qer.h"
+#include "genl_bar.h"
+#include "genl_urr.h"
 
 
 void notify(int pdr_id)
@@ -132,6 +134,38 @@ static const struct genl_ops upf_genl_ops[] = {
 #if defined(FEATURE_GENL_POLICY)
 		.policy = upf_genl_qer_policy,
 #endif
+		.flags = GENL_ADMIN_PERM,
+	},
+	{
+		.cmd = UPF_CMD_ADD_BAR,
+		.doit = upf_genl_add_bar,
+		.flags = GENL_ADMIN_PERM,
+	},
+	{
+		.cmd = UPF_CMD_DEL_BAR,
+		.doit = upf_genl_del_bar,
+		.flags = GENL_ADMIN_PERM,
+	},
+	{
+		.cmd = UPF_CMD_GET_BAR,
+		.doit = upf_genl_get_bar,
+		.dumpit = upf_genl_dump_bar,
+		.flags = GENL_ADMIN_PERM,
+	},
+	{
+		.cmd = UPF_CMD_ADD_URR,
+		.doit = upf_genl_add_urr,
+		.flags = GENL_ADMIN_PERM,
+	},
+	{
+		.cmd = UPF_CMD_DEL_URR,
+		.doit = upf_genl_del_urr,
+		.flags = GENL_ADMIN_PERM,
+	},
+	{
+		.cmd = UPF_CMD_GET_URR,
+		.doit = upf_genl_get_urr,
+		.dumpit = upf_genl_dump_urr,
 		.flags = GENL_ADMIN_PERM,
 	},
 };

@@ -7,6 +7,7 @@
 
 #include <net/ip.h>
 
+#include "bar.h"
 #include "pktinfo.h"
 
 struct outer_header_creation {
@@ -30,10 +31,13 @@ struct forwarding_parameter {
 
 struct far {
 	struct hlist_node hlist_id;
+	struct hlist_node hlist_related_bar;
 	u64 seid;
 	u32 id;
 	u8 action;
 	struct forwarding_parameter *fwd_param;
+	u8 *bar_id;
+	struct bar *bar;
 	struct net_device *dev;
 	struct rcu_head rcu_head;
 };

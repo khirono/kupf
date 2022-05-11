@@ -9,6 +9,8 @@
 #include "pdr.h"
 #include "far.h"
 #include "qer.h"
+#include "bar.h"
+#include "urr.h"
 #include "genl_far.h"
 #include "pktinfo.h"
 
@@ -67,6 +69,16 @@ int upf_dev_hashtable_new(struct upf_dev *upf, int hsize)
 	if (!upf->qer_id_hash)
 		goto err;
 
+	upf->bar_id_hash = kmalloc_array(hsize, sizeof(struct hlist_head),
+			GFP_KERNEL);
+	if (!upf->bar_id_hash)
+		goto err;
+
+	upf->urr_id_hash = kmalloc_array(hsize, sizeof(struct hlist_head),
+			GFP_KERNEL);
+	if (!upf->urr_id_hash)
+		goto err;
+
 	upf->related_far_hash = kmalloc_array(hsize, sizeof(struct hlist_head),
 			GFP_KERNEL);
 	if (!upf->related_far_hash)
@@ -77,6 +89,16 @@ int upf_dev_hashtable_new(struct upf_dev *upf, int hsize)
 	if (!upf->related_qer_hash)
 		goto err;
 
+	upf->related_bar_hash = kmalloc_array(hsize, sizeof(struct hlist_head),
+			GFP_KERNEL);
+	if (!upf->related_bar_hash)
+		goto err;
+
+	upf->related_urr_hash = kmalloc_array(hsize, sizeof(struct hlist_head),
+			GFP_KERNEL);
+	if (!upf->related_urr_hash)
+		goto err;
+
 	upf->hash_size = hsize;
 
 	for (i = 0; i < hsize; i++) {
@@ -85,8 +107,12 @@ int upf_dev_hashtable_new(struct upf_dev *upf, int hsize)
 		INIT_HLIST_HEAD(&upf->pdr_id_hash[i]);
 		INIT_HLIST_HEAD(&upf->far_id_hash[i]);
 		INIT_HLIST_HEAD(&upf->qer_id_hash[i]);
+		INIT_HLIST_HEAD(&upf->bar_id_hash[i]);
+		INIT_HLIST_HEAD(&upf->urr_id_hash[i]);
 		INIT_HLIST_HEAD(&upf->related_far_hash[i]);
 		INIT_HLIST_HEAD(&upf->related_qer_hash[i]);
+		INIT_HLIST_HEAD(&upf->related_bar_hash[i]);
+		INIT_HLIST_HEAD(&upf->related_urr_hash[i]);
 	}
 
 	return 0;
@@ -100,6 +126,8 @@ void upf_dev_hashtable_free(struct upf_dev *upf)
 	struct pdr *pdr;
 	struct far *far;
 	struct qer *qer;
+	struct bar *bar;
+	struct urr *urr;
 	int i;
 
 	for (i = 0; i < upf->hash_size; i++) {
@@ -109,6 +137,10 @@ void upf_dev_hashtable_free(struct upf_dev *upf)
 			far_context_delete(far);
 		hlist_for_each_entry_rcu(pdr, &upf->pdr_id_hash[i], hlist_id)
 			pdr_context_delete(pdr);
+		hlist_for_each_entry_rcu(bar, &upf->bar_id_hash[i], hlist_id)
+			bar_context_delete(bar);
+		hlist_for_each_entry_rcu(urr, &upf->urr_id_hash[i], hlist_id)
+			urr_context_delete(urr);
 	}
 
 	synchronize_rcu();
@@ -118,8 +150,12 @@ void upf_dev_hashtable_free(struct upf_dev *upf)
 	kfree(upf->pdr_id_hash);
 	kfree(upf->far_id_hash);
 	kfree(upf->qer_id_hash);
+	kfree(upf->bar_id_hash);
+	kfree(upf->urr_id_hash);
 	kfree(upf->related_far_hash);
 	kfree(upf->related_qer_hash);
+	kfree(upf->related_bar_hash);
+	kfree(upf->related_urr_hash);
 }
 
 static int upf_dev_init(struct net_device *dev)
