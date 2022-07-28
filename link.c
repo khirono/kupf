@@ -67,6 +67,15 @@ static int upf_validate(struct nlattr *tb[], struct nlattr *data[],
 	return 0;
 }
 
+static void upf_destructor(struct net_device *dev)
+{
+	struct upf_dev *upf = netdev_priv(dev);
+
+	printk("<%s: %d> start\n", __func__, __LINE__);
+
+	upf_dev_hashtable_free(upf);
+}
+
 static int upf_newlink(struct net *net, struct net_device *dev,
 		struct nlattr *tb[], struct nlattr *data[],
 		struct netlink_ext_ack *extack)
@@ -115,6 +124,7 @@ static int upf_newlink(struct net *net, struct net_device *dev,
 
 	upf_net = net_generic(dev_net(dev), UPF_NET_ID());
 	list_add_rcu(&upf->list, &upf_net->upf_dev_list);
+	dev->priv_destructor = upf_destructor;
 
 	return 0;
 }
@@ -125,7 +135,6 @@ static void upf_dellink(struct net_device *dev, struct list_head *head)
 
 	printk("<%s: %d> start\n", __func__, __LINE__);
 
-	upf_dev_hashtable_free(upf);
 	list_del_rcu(&upf->list);
 	unregister_netdevice_queue(dev, head);
 }
